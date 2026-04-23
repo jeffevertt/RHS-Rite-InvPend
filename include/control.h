@@ -1,0 +1,115 @@
+#ifndef CONTROL_H
+#define CONTROL_H
+
+#include <Arduino.h>
+#include <FastAccelStepper.h>
+
+// defines
+#define STEPPER_WHEEL_DIAMETER              12.75             // wheel diam (mm)
+#define STEPPER_STEPS_PER_REV               800.0f            // 3200.0f for 1/16 (ON|ON|ON), 800.0f for 1/4 (OFF|ON|OFF)
+#define STEPPER_MM_PER_REV                  (STEPPER_WHEEL_DIAMETER * 3.14159f)
+#define STEPPER_STEPS_PER_MM                (STEPPER_STEPS_PER_REV / STEPPER_MM_PER_REV)
+
+#define STEPPER_ACCEL_SETUP                 5000
+#define STEPPER_ACCEL_SWINGUP               20000
+#define STEPPER_ACCEL_STABILIZING_SETUP     20000
+#define STEPPER_ACCEL_STABILIZING           60000
+#define STEPPER_SPEED_IN_HZ_SETUP           1500
+#define STEPPER_SPEED_IN_HZ_SWINGUP_SETUP   4000
+#define STEPPER_SPEED_IN_HZ_SWINGUP         4000
+#define STEPPER_SPEED_IN_HZ_STABILIZING     8000
+
+#define PENDULUM_LENGTH_METERS              0.305f
+#define PENDULUM_LENGTH_MM                  (PENDULUM_LENGTH_METERS * 100.0f)
+#define PENDULUM_MOMENT_OF_INERTIA          (PENDULUM_LENGTH_METERS / 9.81f)        // L/g
+
+#define ANG_VEL_SMOOTHING_FACTOR            0.8f                                    // 0 to 1 (0 is no smoothing)
+
+#define STABILIZE_EXPECTED_LATENCY_ANGLE    0.005f                                  // seconds
+
+#define SWINGUP_MINIMUM_ENERGY              2.0f
+#define SWINGUP_TARGET_ENERGY               (SWINGUP_MINIMUM_ENERGY + 0.1f)
+#define SWINGUP_ENERGY_DAMP_FACTOR          10.0f                                   // higher is more damping
+#define SWINGUP_RAMP_DOWN_GAIN              1.8f                                   // slows approach to target energy
+#define SWINGUP_OUTPUT_SMOOTHING            0.1f                                    // 0.0f none, 0.9f lots of smoothing
+
+#define SWINGUP_SETUP_DELTA_SMOOTHING       0.2f                                   // 0 to 1 (0 is no smoothing)
+#define SWINGUP_SETUP_CATCH_GAIN(ENERGY)    (constrain(((ENERGY)-1.95f)*50.0f, 0.0f, 2.0f))
+
+// macros
+#define D2R(deg)                            ((deg) * DEG_TO_RAD)
+
+// states
+enum ControlState {
+    STATE_IDLE,
+    STATE_SWINGUP_SETUP,
+    STATE_SWINGUP,
+    STATE_STABILIZING_SETUP,
+    STATE_STABILIZING
+};
+
+// Control class
+class Control {
+public:
+    Control(float trackMin, float trackMax, FastAccelStepper* stepper);
+    
+    // main entry point - calculate the cart delta position (in mm)
+    float calcCartDeltaMM(float curAngle, float curPos, unsigned long deltaTime_microSec);
+    
+    ControlState getState() const { return _state; }
+    void gotoState(ControlState state, float curPos);
+
+    float trackCenter() const { return (_trackMin + _trackMax) * 0.5f; }
+    float trackHalfWidth() const { return _trackMax - trackCenter(); }
+
+    float getEnergy_total() const { return _energyKinetic + _energyPotential; }
+    float getEnergy_potential() const { return _energyPotential; }
+    float getEnergy_kinetic() const { return _energyKinetic; }
+    float getAngVelocity() const { return _angVelSmoothed; }
+    float getSwingUpPosTrg() const { return _swingUpDeltaMMSmoothed; }
+
+    float getDEBUG() const { return _stabilizingSetupDeltaMM; }
+
+private:
+    ControlState _state;
+    float _trackMin, _trackMax;
+    float _timeInState = 0;                                     // seconds
+    FastAccelStepper* _stepper = NULL;
+
+    // PID & cascaded-centering
+    const float kStabilize_P = 40.0f;
+    const float kStabilize_I =  0.15f;
+    const float kStabilize_D =  1.0f;
+    const float kStabalizeCascade_centerCartDstToAngle = -0.03f; 
+    const float kStabalizeCascade_centerCartMaxAngle = 2.0f;
+    const float kStabilize_integralDecay = 0.98f;
+    const float kStabilize_derivativeSmoothing = 0.25f;         // 0 to 1 (0 is no smoothing)
+    float _stabilize_lastDstError = 0.0f;
+    float _stabilize_dstErrorIntegral = 0.0f;
+    float _stabilize_dstErrorDerivative_smoothed = 0.0f;
+
+    // stabilize setup state
+    float _stabilizingSetupTrgPosMM = 0.0f;
+    float _stabilizingSetupDeltaMM = 0.0f;
+    float _stabilizingSetupInitAngVel = 0.0f;
+
+    // swing-up state
+    float _swingUpDeltaMMSmoothed = 0.0f;
+
+    // calculations shared by the states
+    float _angVel_lastAngle = 0;
+    float _angVelSmoothed = 0;
+    float _energyPotential = 0;
+    float _energyKinetic = 0;
+    void updateAngVelandFriends(float curAngle, float dt);
+
+    // state fns
+    float calcCartDeltaMM_stabilizing_setup(float curAngle, float curPos, float dt);
+    float calcCartDeltaMM_stabilizing_PID(float curAngle, float curPos, float dt);
+    float calcCartDeltaMM_stabilizing_cascadedCenteringPID(float curAngle, float curPos, float dt);
+    float calcCartDeltaMM_swingUp_Setup(float curAngle, float curPos, float dt);
+    float calcCartDeltaMM_swingUp(float curAngle, float curPos, float dt);
+    float calcCartDeltaMM_idle(float curAngle, float curPos, float dt);
+};
+
+#endif
