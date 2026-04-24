@@ -25,7 +25,14 @@
 
 #define ANG_VEL_SMOOTHING_FACTOR            0.8f                                    // 0 to 1 (0 is no smoothing)
 
+#define STABILIZE_PID_P                     40.0f
+#define STABILIZE_PID_I                     0.1f
+#define STABILIZE_PID_D                     1.0f
 #define STABILIZE_EXPECTED_LATENCY_ANGLE    0.005f                                  // seconds
+#define STABILIZE_CASCADE_CENTER_DST_TO_ANGLE -0.03f
+#define STABILIZE_CASCADE_CENTER_MAX_ANGLE  2.0f
+#define STABILIZE_INTEGRAL_DECAY            0.98f
+#define STABILIZE_DERIVATIVE_SMOOTHING      0.25f                                   // 0 to 1 (0 is no smoothing)
 
 #define SWINGUP_MINIMUM_ENERGY              2.0f
 #define SWINGUP_TARGET_ENERGY               (SWINGUP_MINIMUM_ENERGY + 0.1f)
@@ -77,13 +84,6 @@ private:
     FastAccelStepper* _stepper = NULL;
 
     // PID & cascaded-centering
-    const float kStabilize_P = 40.0f;
-    const float kStabilize_I =  0.15f;
-    const float kStabilize_D =  1.0f;
-    const float kStabalizeCascade_centerCartDstToAngle = -0.03f; 
-    const float kStabalizeCascade_centerCartMaxAngle = 2.0f;
-    const float kStabilize_integralDecay = 0.98f;
-    const float kStabilize_derivativeSmoothing = 0.25f;         // 0 to 1 (0 is no smoothing)
     float _stabilize_lastDstError = 0.0f;
     float _stabilize_dstErrorIntegral = 0.0f;
     float _stabilize_dstErrorDerivative_smoothed = 0.0f;

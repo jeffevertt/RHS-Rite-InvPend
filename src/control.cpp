@@ -211,10 +211,10 @@ float Control::calcCartDeltaMM_stabilizing_cascadedCenteringPID(float curAngle, 
 
     // predict the angle a bit ahead in time & use that rather than the curAngle (which is already out of date)
     float predictedAngle = curAngle + (_angVelSmoothed * STABILIZE_EXPECTED_LATENCY_ANGLE);
-    
+
     // position error (secondary goal is getting to the center of the track) translated into angle error
     float posError = curPos - trackCenter();
-    predictedAngle += constrain(posError * kStabalizeCascade_centerCartDstToAngle, -kStabalizeCascade_centerCartMaxAngle, kStabalizeCascade_centerCartMaxAngle);
+    predictedAngle += constrain(posError * STABILIZE_CASCADE_CENTER_DST_TO_ANGLE, -STABILIZE_CASCADE_CENTER_MAX_ANGLE, STABILIZE_CASCADE_CENTER_MAX_ANGLE);
 
     // standard PID control code
     return calcCartDeltaMM_stabilizing_PID(predictedAngle, curPos, dt);
@@ -227,17 +227,17 @@ float Control::calcCartDeltaMM_stabilizing_PID(float curAngle, float curPos, flo
     // derivative calculation (and smoothing)
     float derivative_thisFrame = (dstError - _stabilize_lastDstError) / dt;
     _stabilize_dstErrorDerivative_smoothed = (_timeInState == 0) ? derivative_thisFrame :
-        (((1.0f - kStabilize_derivativeSmoothing) * derivative_thisFrame) + (kStabilize_derivativeSmoothing * _stabilize_dstErrorDerivative_smoothed));
+        (((1.0f - STABILIZE_DERIVATIVE_SMOOTHING) * derivative_thisFrame) + (STABILIZE_DERIVATIVE_SMOOTHING * _stabilize_dstErrorDerivative_smoothed));
 
     // update derivative & integral error trackers
     _stabilize_dstErrorIntegral += dstError * dt;
     _stabilize_dstErrorIntegral = constrain(_stabilize_dstErrorIntegral, -2.5f, 2.5f);    // constrain integral to prevent "windup"
-    _stabilize_dstErrorIntegral *= kStabilize_integralDecay;
+    _stabilize_dstErrorIntegral *= STABILIZE_INTEGRAL_DECAY;
 
     // PID
-    float cartDeltaMM = kStabilize_P * dstError + 
-                        kStabilize_I * _stabilize_dstErrorIntegral + 
-                        kStabilize_D * _stabilize_dstErrorDerivative_smoothed;
+    float cartDeltaMM = STABILIZE_PID_P * dstError + 
+                        STABILIZE_PID_I * _stabilize_dstErrorIntegral + 
+                        STABILIZE_PID_D * _stabilize_dstErrorDerivative_smoothed;
 
     // update trackers
     _stabilize_lastDstError = dstError;

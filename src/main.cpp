@@ -241,10 +241,9 @@ void loop() {
     Serial.print("state="); Serial.print(control->getState(), 1); 
     //Serial.print(", pos="); Serial.print(posMM, 0);
     //Serial.print(" mm, ang="); Serial.print(angleDeg, 1); 
-    //Serial.print(" deg, dt="); Serial.print(deltaTime_microSec);
-    //Serial.print(" us, angVel="); Serial.print(control->getAngVelocity(), 1);
-    Serial.print(", energy="); Serial.print(control->getEnergy_total(), 1);
-    Serial.print(", catchDelta="); Serial.print(control->getDEBUG(), 1);
+    Serial.print(", angVel="); Serial.print(control->getAngVelocity(), 1);
+    Serial.print(", energy="); Serial.print(control->getEnergy_total(), 2);
+    Serial.print(", dt="); Serial.print(deltaTime_microSec);
     Serial.println();
   }
 }
