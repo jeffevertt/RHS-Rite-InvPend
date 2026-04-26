@@ -17,7 +17,7 @@
 #define STEPPER_SPEED_IN_HZ_SETUP               1500
 #define STEPPER_SPEED_IN_HZ_SWINGUP             5000
 #define STEPPER_SPEED_IN_HZ_STABILIZING_SETUP   4000
-#define STEPPER_SPEED_IN_HZ_STABILIZING         8000
+#define STEPPER_SPEED_IN_HZ_STABILIZING         6000
 
 #define PENDULUM_LENGTH_METERS                  0.305f
 #define PENDULUM_LENGTH_MM                      (PENDULUM_LENGTH_METERS * 100.0f)
@@ -25,6 +25,7 @@
 
 #define TRACK_GUARDRAIL_DST_MM                  15.0f
 #define TRACK_GUARDRAIL_DST_MM_FORCESTOP        5.0f                                    // if using force stop, can be more aggressive
+#define TRACK_GUARDRAIL_GIVE_UP_DST_SCALAR      5.0f
 
 #define ANG_VEL_SMOOTHING_FACTOR                0.25f                                    // 0 to 1 (0 is no smoothing)
 
@@ -42,6 +43,8 @@
 #define STABILIZE_LQR_GAIN_VEL_LIN              8.0f                                    // linear velocity gain (cart speed damping)
 #define STABILIZE_LQR_GAIN_ANGLE                120.0f                                  // angle gain (primary balancing force)
 #define STABILIZE_LQR_GAIN_VEL_ANG              25.0f                                   // angular velocity gain (fights arm momentum)
+#define STABILIZE_LQR_GIVE_UP_ANG_VEL           0.075f                                  // angular velocity (rad/s) at which we start giving up
+#define STABILIZE_LQR_GIVE_UP_GAIN              0.5f                                    // scaled by micro-sec deltaTime & signal above max
 
 #define SWINGUP_MINIMUM_ENERGY                  2.05f
 #define SWINGUP_TARGET_ENERGY                   (SWINGUP_MINIMUM_ENERGY + 0.1f)
@@ -99,7 +102,7 @@ private:
     float _stabilizePID_dstErrorDerivative_smoothed = 0.0f;
 
     // stabilize: LQR
-    float _stabilizeLQR_trgPosMM = 0.0f;
+    float _stabilizeLQR_giveUpPerc = 0.0f;
 
     // stabilize setup state "the catch state"
     float _stabilizingSetupTrgPosMM = 0.0f;

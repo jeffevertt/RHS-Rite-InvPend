@@ -42,7 +42,7 @@ void Control::gotoState(ControlState state, float curPos)
         _stabilizePID_lastDstError = 0.0f;
         _stabilizePID_dstErrorIntegral = 0.0f;
         _stabilizePID_dstErrorDerivative_smoothed = 0.0f;
-        _stabilizeLQR_trgPosMM = 0.0f;
+        _stabilizeLQR_giveUpPerc = 0.0f;
         _stepper->setAcceleration(STEPPER_ACCEL_STABILIZING);
         _stepper->setSpeedInHz(STEPPER_SPEED_IN_HZ_STABILIZING);
     }
@@ -262,11 +262,9 @@ float Control::calcCartDeltaMM_stabilizing_PID(float curAngle, float curPos, flo
 float Control::calcCartDeltaMM_stabilizing_LQR(float curAngle, float curPos, float dt)
 {
     // guard against going too close to the edges of the track
-    //float maxDecelMM = (float)_stepper->getAcceleration() / STEPPER_STEPS_PER_MM;
     float linVelMMpS = (float)_stepper->getCurrentSpeedInMilliHz() / (1000.0f * STEPPER_STEPS_PER_MM);
-    float stopDstMM = 0.0f; //(linVelMMpS * linVelMMpS) / (2.0f * maxDecelMM); // v^2 / 2a
-    bool inMinGuardRail = (curPos - stopDstMM < _trackMin + TRACK_GUARDRAIL_DST_MM_FORCESTOP);
-    bool inMaxGuardRail = (curPos + stopDstMM > _trackMax - TRACK_GUARDRAIL_DST_MM_FORCESTOP);
+    bool inMinGuardRail = (curPos < _trackMin + TRACK_GUARDRAIL_DST_MM_FORCESTOP);
+    bool inMaxGuardRail = (curPos > _trackMax - TRACK_GUARDRAIL_DST_MM_FORCESTOP);
     if (((linVelMMpS < 0) && inMinGuardRail) || ((linVelMMpS > 0) && inMaxGuardRail)) {
         // if moving toward an edge and can't stop before the guardrail, ABORT
         _stepper->forceStop();
@@ -286,6 +284,12 @@ float Control::calcCartDeltaMM_stabilizing_LQR(float curAngle, float curPos, flo
     float angleDeltaRad = radians(curAngle - 180.0f); 
     float angVelRad = radians(_angVelSmoothed);
 
+    // if ang vel is too high, progressively give it up
+    float giveUpNearEdgeFactor = max(max(((_trackMin + TRACK_GUARDRAIL_DST_MM * TRACK_GUARDRAIL_GIVE_UP_DST_SCALAR) - curPos), 
+                                         (curPos - (_trackMax - TRACK_GUARDRAIL_DST_MM * TRACK_GUARDRAIL_GIVE_UP_DST_SCALAR))), 0.0f) * 0.1f;
+    float giveUpFactor = max((abs(angleDeltaRad) - STABILIZE_LQR_GIVE_UP_ANG_VEL) * STABILIZE_LQR_GIVE_UP_GAIN * giveUpNearEdgeFactor - 0.1f, -0.1f);
+    _stabilizeLQR_giveUpPerc = constrain(_stabilizeLQR_giveUpPerc + giveUpFactor, 0.0f, 1.0f);
+
     // LQR Gain Vector (K) - computed in advance from...
     //  m (pend mass) 22g, L 33cm, M (cart mass) ~500g
     const float Kp = 20.0f;  //8.5f;      // position gain (stay near center)
@@ -295,16 +299,15 @@ float Control::calcCartDeltaMM_stabilizing_LQR(float curAngle, float curPos, flo
 
     // calc target velocity (feedback)
     float targetVelMpS = -(-Kp * posDeltaM + -Kv * linVelMpS + Kt * angleDeltaRad + Ko * angVelRad);
-    float targetVelMMpS = targetVelMpS * 1000.0f;
+    float targetVelMMpS = targetVelMpS * 1000.0f * (1.0f - _stabilizeLQR_giveUpPerc);
 
     // constrain
     float maxVelMM = (float)STEPPER_SPEED_IN_HZ_STABILIZING / STEPPER_STEPS_PER_MM;
     targetVelMMpS = constrain(targetVelMMpS, -maxVelMM, maxVelMM);
 
     // guardrail
-    float intentStopDstMM = 0.0f; //(targetVelMMpS * targetVelMMpS) / (2.0f * maxDecelMM);
-    bool intentViolatesMin = (targetVelMMpS < 0 && (curPos - intentStopDstMM < _trackMin + TRACK_GUARDRAIL_DST_MM_FORCESTOP));
-    bool intentViolatesMax = (targetVelMMpS > 0 && (curPos + intentStopDstMM > _trackMax - TRACK_GUARDRAIL_DST_MM_FORCESTOP));
+    bool intentViolatesMin = (targetVelMMpS < 0 && (curPos < _trackMin + TRACK_GUARDRAIL_DST_MM_FORCESTOP));
+    bool intentViolatesMax = (targetVelMMpS > 0 && (curPos > _trackMax - TRACK_GUARDRAIL_DST_MM_FORCESTOP));
     if (intentViolatesMin || intentViolatesMax) {
         _stepper->forceStop();
         gotoState(STATE_SWINGUP_SETUP, curPos); 
@@ -314,27 +317,10 @@ float Control::calcCartDeltaMM_stabilizing_LQR(float curAngle, float curPos, flo
     // set the stepper velocity directly for low latency control
     // use applySpeedAcceleration() to let the library handle the ramp, but the 'goal' speed is updated every frame
     int32_t targetHz = (int32_t)(targetVelMMpS * STEPPER_STEPS_PER_MM); // convert MM/S back to Hz.
-    _stepper->setSpeedInHz(abs(targetHz));      
+    _stepper->setSpeedInHz(abs(targetHz));    
     if (targetHz > 0) _stepper->runForward();
     else if (targetHz < 0) _stepper->runBackward();
     else _stepper->stopMove();
 
     return 0;
 }
-    // old intergrated position code
-
-    // // integrate into an accumulated delta & constrain to track
-    // _stabilizeLQR_trgPosMM += targetVelMMpS * dt;
-    // _stabilizeLQR_trgPosMM = constrain(_stabilizeLQR_trgPosMM, _trackMin + TRACK_GUARDRAIL_DST_MM * 2.0f, _trackMax - TRACK_GUARDRAIL_DST_MM * 2.0f);
-
-    // // we return the desired positional offset from current
-    // float deltaMM = _stabilizeLQR_trgPosMM - curPos;
-
-    // // leach the trgPos - don't get the virtual target get too far head of reality
-    // const float leashDistMM = 35.0f;
-    // if (abs(deltaMM) > leashDistMM) {
-    //     _stabilizeLQR_trgPosMM = curPos + (deltaMM > 0 ? leashDistMM : -leashDistMM);
-    //     deltaMM = (deltaMM > 0 ? leashDistMM : -leashDistMM);
-    // }
-
-    //return deltaMM;
