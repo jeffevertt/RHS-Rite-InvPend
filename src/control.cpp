@@ -16,6 +16,11 @@ void Control::gotoState(ControlState state, float curPos)
     _state = state;
     _timeInState = 0;
 
+    // reset the stepper (in case it was in velocity vs position control)
+    if ((previousState == STATE_STABILIZING) && (STABILIZE_USE_LQR == 1)) {
+        _stepper->forceStopAndNewPosition(_stepper->getCurrentPosition());
+    }
+
     // on enter state
     if (_state == STATE_SWINGUP_SETUP) {
         _stepper->setAcceleration(STEPPER_ACCEL_SETUP);
@@ -31,12 +36,13 @@ void Control::gotoState(ControlState state, float curPos)
         _stabilizingSetupDeltaMM = 0.0f;
         _stabilizingSetupInitAngVel = _angVelSmoothed;
         _stepper->setAcceleration(STEPPER_ACCEL_STABILIZING_SETUP);
-        _stepper->setSpeedInHz(STEPPER_SPEED_IN_HZ_SWINGUP_SETUP);
+        _stepper->setSpeedInHz(STEPPER_SPEED_IN_HZ_STABILIZING_SETUP);
     }
     else if (_state == STATE_STABILIZING) {
-        _stabilize_lastDstError = 0.0f;
-        _stabilize_dstErrorIntegral = 0.0f;
-        _stabilize_dstErrorDerivative_smoothed = 0.0f;
+        _stabilizePID_lastDstError = 0.0f;
+        _stabilizePID_dstErrorIntegral = 0.0f;
+        _stabilizePID_dstErrorDerivative_smoothed = 0.0f;
+        _stabilizeLQR_trgPosMM = 0.0f;
         _stepper->setAcceleration(STEPPER_ACCEL_STABILIZING);
         _stepper->setSpeedInHz(STEPPER_SPEED_IN_HZ_STABILIZING);
     }
@@ -63,7 +69,12 @@ float Control::calcCartDeltaMM(float curAngle, float curPos, unsigned long delta
             cartDeltaMM = calcCartDeltaMM_stabilizing_setup(curAngle, curPos, dt);
             break;
         case STATE_STABILIZING:
-            cartDeltaMM = calcCartDeltaMM_stabilizing_cascadedCenteringPID(curAngle, curPos, dt);
+            if (STABILIZE_USE_LQR) {
+                cartDeltaMM = calcCartDeltaMM_stabilizing_LQR(curAngle, curPos, dt);
+            }
+            else {
+                cartDeltaMM = calcCartDeltaMM_stabilizing_cascadedCenteringPID(curAngle, curPos, dt);
+            }
             break;
         default: // IDLE
             cartDeltaMM = calcCartDeltaMM_idle(curAngle, curPos, dt);
@@ -112,9 +123,6 @@ float Control::calcCartDeltaMM_swingUp_Setup(float curAngle, float curPos, float
         return toCenter;
     }
 
-    // reset
-    _swingUpDeltaMMSmoothed = 0.0f;
-
     // ready, let's move on
     gotoState(STATE_SWINGUP, curPos);
 
@@ -125,7 +133,7 @@ float Control::calcCartDeltaMM_swingUp_Setup(float curAngle, float curPos, float
 float Control::calcCartDeltaMM_swingUp(float curAngle, float curPos, float dt) {
     // check to see if we are ready to go into stabilizing
     float energyTotal = getEnergy_total();
-    if ((energyTotal > SWINGUP_MINIMUM_ENERGY) && (abs(curAngle - 180.0f) < 40.0f)) {
+    if ((energyTotal > SWINGUP_MINIMUM_ENERGY) && (abs(curAngle - 180.0f) < 25.0f)) {
         gotoState(STATE_STABILIZING_SETUP, curPos);
         return 0;
     }
@@ -135,11 +143,18 @@ float Control::calcCartDeltaMM_swingUp(float curAngle, float curPos, float dt) {
     float predictedAngleRad = radians(curAngle + _angVelSmoothed * lookAheadTime);
 
     // energy-based damping (for smooth transition to stabilizing)
-    float energyError = SWINGUP_TARGET_ENERGY - energyTotal;
-    float preStabilizeDampFactor = constrain(energyError * SWINGUP_ENERGY_DAMP_FACTOR, 0.0f, 1.0f);
+    float energyError = max(SWINGUP_TARGET_ENERGY - energyTotal, 0.0f);
+    float preStabilizeDampFactor = 1.0f - constrain(energyError * SWINGUP_ENERGY_GAIN, 0.0f, 1.0f);
+
+    // energy injection for low energy state
+    float lowEnergyPump = 0;
+    if (energyTotal < SWINGUP_MINIMUM_ENERGY * 0.5f) {
+        float pumpDir = (_angVelSmoothed >= 0) ? -1.0f : 1.0f;
+        lowEnergyPump = pumpDir * SWINGUP_PUMP_KICK_MM;
+    }
 
     // calculate the cart's target position
-    float targetDeltaFromCenter = -1.0f * (PENDULUM_LENGTH_MM * preStabilizeDampFactor * sin(predictedAngleRad));
+    float targetDeltaFromCenter = -1.0f * (PENDULUM_LENGTH_MM * (1.0f - preStabilizeDampFactor) * sin(predictedAngleRad)) + lowEnergyPump;
     float absoluteTarget = trackCenter() + targetDeltaFromCenter;
     float rawDelta = absoluteTarget - curPos;
 
@@ -191,8 +206,7 @@ float Control::calcCartDeltaMM_stabilizing_setup(float curAngle, float curPos, f
     _stabilizingSetupTrgPosMM += deltaMM;
 
     // if too close to the edge of the track, drop out of the state
-    const float endOfTrackBuffer = 15.0f;
-    if (_stabilizingSetupTrgPosMM < _trackMin + endOfTrackBuffer || _stabilizingSetupTrgPosMM > _trackMax - endOfTrackBuffer) {
+    if (_stabilizingSetupTrgPosMM < _trackMin + TRACK_GUARDRAIL_DST_MM || _stabilizingSetupTrgPosMM > _trackMax - TRACK_GUARDRAIL_DST_MM) {
         gotoState(STATE_SWINGUP_SETUP, curPos);
     }
 
@@ -225,22 +239,102 @@ float Control::calcCartDeltaMM_stabilizing_PID(float curAngle, float curPos, flo
     float dstError = PENDULUM_LENGTH_MM * sin(radians(180.0f - curAngle));
 
     // derivative calculation (and smoothing)
-    float derivative_thisFrame = (dstError - _stabilize_lastDstError) / dt;
-    _stabilize_dstErrorDerivative_smoothed = (_timeInState == 0) ? derivative_thisFrame :
-        (((1.0f - STABILIZE_DERIVATIVE_SMOOTHING) * derivative_thisFrame) + (STABILIZE_DERIVATIVE_SMOOTHING * _stabilize_dstErrorDerivative_smoothed));
+    float derivative_thisFrame = (dstError - _stabilizePID_lastDstError) / dt;
+    _stabilizePID_dstErrorDerivative_smoothed = (_timeInState == 0) ? derivative_thisFrame :
+        (((1.0f - STABILIZE_DERIVATIVE_SMOOTHING) * derivative_thisFrame) + (STABILIZE_DERIVATIVE_SMOOTHING * _stabilizePID_dstErrorDerivative_smoothed));
 
     // update derivative & integral error trackers
-    _stabilize_dstErrorIntegral += dstError * dt;
-    _stabilize_dstErrorIntegral = constrain(_stabilize_dstErrorIntegral, -2.5f, 2.5f);    // constrain integral to prevent "windup"
-    _stabilize_dstErrorIntegral *= STABILIZE_INTEGRAL_DECAY;
+    _stabilizePID_dstErrorIntegral += dstError * dt;
+    _stabilizePID_dstErrorIntegral = constrain(_stabilizePID_dstErrorIntegral, -2.5f, 2.5f);    // constrain integral to prevent "windup"
+    _stabilizePID_dstErrorIntegral *= STABILIZE_INTEGRAL_DECAY;
 
     // PID
     float cartDeltaMM = STABILIZE_PID_P * dstError + 
-                        STABILIZE_PID_I * _stabilize_dstErrorIntegral + 
-                        STABILIZE_PID_D * _stabilize_dstErrorDerivative_smoothed;
+                        STABILIZE_PID_I * _stabilizePID_dstErrorIntegral + 
+                        STABILIZE_PID_D * _stabilizePID_dstErrorDerivative_smoothed;
 
     // update trackers
-    _stabilize_lastDstError = dstError;
+    _stabilizePID_lastDstError = dstError;
 
     return cartDeltaMM;
 }
+
+float Control::calcCartDeltaMM_stabilizing_LQR(float curAngle, float curPos, float dt)
+{
+    // guard against going too close to the edges of the track
+    //float maxDecelMM = (float)_stepper->getAcceleration() / STEPPER_STEPS_PER_MM;
+    float linVelMMpS = (float)_stepper->getCurrentSpeedInMilliHz() / (1000.0f * STEPPER_STEPS_PER_MM);
+    float stopDstMM = 0.0f; //(linVelMMpS * linVelMMpS) / (2.0f * maxDecelMM); // v^2 / 2a
+    bool inMinGuardRail = (curPos - stopDstMM < _trackMin + TRACK_GUARDRAIL_DST_MM_FORCESTOP);
+    bool inMaxGuardRail = (curPos + stopDstMM > _trackMax - TRACK_GUARDRAIL_DST_MM_FORCESTOP);
+    if (((linVelMMpS < 0) && inMinGuardRail) || ((linVelMMpS > 0) && inMaxGuardRail)) {
+        // if moving toward an edge and can't stop before the guardrail, ABORT
+        _stepper->forceStop();
+        gotoState(STATE_SWINGUP_SETUP, curPos); 
+        return 0;
+    }
+
+    // state transition logic (pendulum has falling beyond recovery)
+    if (abs(curAngle - 180.0f) > 60.0f) {
+        gotoState(STATE_SWINGUP_SETUP, curPos);
+        return 0;
+    }
+
+    // state
+    float posDeltaM = (curPos - trackCenter()) / 1000.0f; 
+    float linVelMpS = linVelMMpS / 1000.0f;
+    float angleDeltaRad = radians(curAngle - 180.0f); 
+    float angVelRad = radians(_angVelSmoothed);
+
+    // LQR Gain Vector (K) - computed in advance from...
+    //  m (pend mass) 22g, L 33cm, M (cart mass) ~500g
+    const float Kp = 20.0f;  //8.5f;      // position gain (stay near center)
+    const float Kv = 20.0f;  //6.2f;      // linear velocity gain (damping)
+    const float Kt = 90.0f; //65.0f;     // angle gain (primary balancing force)
+    const float Ko = 80.0f; //15.5f;     // angVel gain (the 'momentum killer')
+
+    // calc target velocity (feedback)
+    float targetVelMpS = -(-Kp * posDeltaM + -Kv * linVelMpS + Kt * angleDeltaRad + Ko * angVelRad);
+    float targetVelMMpS = targetVelMpS * 1000.0f;
+
+    // constrain
+    float maxVelMM = (float)STEPPER_SPEED_IN_HZ_STABILIZING / STEPPER_STEPS_PER_MM;
+    targetVelMMpS = constrain(targetVelMMpS, -maxVelMM, maxVelMM);
+
+    // guardrail
+    float intentStopDstMM = 0.0f; //(targetVelMMpS * targetVelMMpS) / (2.0f * maxDecelMM);
+    bool intentViolatesMin = (targetVelMMpS < 0 && (curPos - intentStopDstMM < _trackMin + TRACK_GUARDRAIL_DST_MM_FORCESTOP));
+    bool intentViolatesMax = (targetVelMMpS > 0 && (curPos + intentStopDstMM > _trackMax - TRACK_GUARDRAIL_DST_MM_FORCESTOP));
+    if (intentViolatesMin || intentViolatesMax) {
+        _stepper->forceStop();
+        gotoState(STATE_SWINGUP_SETUP, curPos); 
+        return 0;
+    }
+
+    // set the stepper velocity directly for low latency control
+    // use applySpeedAcceleration() to let the library handle the ramp, but the 'goal' speed is updated every frame
+    int32_t targetHz = (int32_t)(targetVelMMpS * STEPPER_STEPS_PER_MM); // convert MM/S back to Hz.
+    _stepper->setSpeedInHz(abs(targetHz));      
+    if (targetHz > 0) _stepper->runForward();
+    else if (targetHz < 0) _stepper->runBackward();
+    else _stepper->stopMove();
+
+    return 0;
+}
+    // old intergrated position code
+
+    // // integrate into an accumulated delta & constrain to track
+    // _stabilizeLQR_trgPosMM += targetVelMMpS * dt;
+    // _stabilizeLQR_trgPosMM = constrain(_stabilizeLQR_trgPosMM, _trackMin + TRACK_GUARDRAIL_DST_MM * 2.0f, _trackMax - TRACK_GUARDRAIL_DST_MM * 2.0f);
+
+    // // we return the desired positional offset from current
+    // float deltaMM = _stabilizeLQR_trgPosMM - curPos;
+
+    // // leach the trgPos - don't get the virtual target get too far head of reality
+    // const float leashDistMM = 35.0f;
+    // if (abs(deltaMM) > leashDistMM) {
+    //     _stabilizeLQR_trgPosMM = curPos + (deltaMM > 0 ? leashDistMM : -leashDistMM);
+    //     deltaMM = (deltaMM > 0 ? leashDistMM : -leashDistMM);
+    // }
+
+    //return deltaMM;

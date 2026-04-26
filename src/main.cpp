@@ -231,19 +231,22 @@ void loop() {
 
   // control logic - returns the cart/stepper target position
   float cartPosDeltaMM = control->calcCartDeltaMM(angleDeg, posMM, deltaTime_microSec);
-  moveCart(cartPosDeltaMM);
+  if (!control->isControllingVelocityDirectly()) { // The LQR code sets the carts velocity directly (rather than the position target)
+    moveCart(cartPosDeltaMM);
+  }
   
   // log (periodically)
-  unsigned long currentTime = millis();
-  if (currentTime - lastLogTime >= LOG_INTERVAL_MS) {
-    lastLogTime = currentTime;
+  // unsigned long currentTime = millis();
+  // if (currentTime - lastLogTime >= LOG_INTERVAL_MS) {
+  //   lastLogTime = currentTime;
       
-    Serial.print("state="); Serial.print(control->getState(), 1); 
-    //Serial.print(", pos="); Serial.print(posMM, 0);
-    //Serial.print(" mm, ang="); Serial.print(angleDeg, 1); 
-    Serial.print(", angVel="); Serial.print(control->getAngVelocity(), 1);
-    Serial.print(", energy="); Serial.print(control->getEnergy_total(), 2);
-    Serial.print(", dt="); Serial.print(deltaTime_microSec);
-    Serial.println();
-  }
+  //   Serial.print("state="); Serial.print(control->getState(), 1); 
+  //   Serial.print(", pos="); Serial.print(posMM, 0);
+  //   Serial.print(", ang="); Serial.print(angleDeg, 1); 
+  //   //Serial.print(", angVel="); Serial.print(control->getAngVelocity(), 1);
+  //   Serial.print(", energy="); Serial.print(control->getEnergy_total(), 2);
+  //   Serial.print(", dt="); Serial.print(deltaTime_microSec);
+  //   //Serial.print(", delPos="); Serial.print(cartPosDeltaMM);
+  //   Serial.println();
+  // }
 }
