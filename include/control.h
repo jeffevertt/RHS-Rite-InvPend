@@ -39,18 +39,18 @@
 #define STABILIZE_DERIVATIVE_SMOOTHING          0.25f                                   // 0 to 1 (0 is no smoothing)
 
 #define STABILIZE_USE_LQR                       1                                       // If not this, then falls back to cascaded PID controller
-#define STABILIZE_LQR_GAIN_POS                  15.0f                                   // position gain (stay near the center)
-#define STABILIZE_LQR_GAIN_VEL_LIN              8.0f                                    // linear velocity gain (cart speed damping)
-#define STABILIZE_LQR_GAIN_ANGLE                120.0f                                  // angle gain (primary balancing force)
-#define STABILIZE_LQR_GAIN_VEL_ANG              25.0f                                   // angular velocity gain (fights arm momentum)
+#define STABILIZE_LQR_GAIN_POS                 60.0f                                   // position gain (stay near the center)
+#define STABILIZE_LQR_GAIN_VEL_LIN             10.0f                                    // linear velocity gain (cart speed damping)
+#define STABILIZE_LQR_GAIN_ANGLE               150.0f                                   // angle gain (primary balancing force)
+#define STABILIZE_LQR_GAIN_ANG_VEL              30.0f                                   // angVel gain (the 'momentum killer')
 #define STABILIZE_LQR_GIVE_UP_ANG_VEL           0.075f                                  // angular velocity (rad/s) at which we start giving up
 #define STABILIZE_LQR_GIVE_UP_GAIN              0.5f                                    // scaled by micro-sec deltaTime & signal above max
 
-#define SWINGUP_MINIMUM_ENERGY                  2.15f
-#define SWINGUP_TARGET_ENERGY                   (SWINGUP_MINIMUM_ENERGY + 0.1f)
-#define SWINGUP_PUMP_KICK_MM                    12.0f
+#define SWINGUP_MINIMUM_ENERGY                  2.1f
+#define SWINGUP_TARGET_ENERGY                   (SWINGUP_MINIMUM_ENERGY + 0.15f)
+#define SWINGUP_PUMP_KICK_MM                    10.0f
 #define SWINGUP_ENERGY_GAIN                     2.5f                                    // higher is faster swingup
-#define SWINGUP_RAMP_DOWN_GAIN                  2.3f                                    // slows approach to target energy
+#define SWINGUP_RAMP_DOWN_GAIN                  1.5f                                    // slows approach to target energy
 #define SWINGUP_OUTPUT_SMOOTHING                0.1f                                    // 0.0f none, 0.9f lots of smoothing
 
 #define SWINGUP_SETUP_DELTA_SMOOTHING           0.2f                                   // 0 to 1 (0 is no smoothing)

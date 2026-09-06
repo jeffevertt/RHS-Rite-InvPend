@@ -292,10 +292,10 @@ float Control::calcCartDeltaMM_stabilizing_LQR(float curAngle, float curPos, flo
 
     // LQR Gain Vector (K) - computed in advance from...
     //  m (pend mass) 22g, L 33cm, M (cart mass) ~500g
-    const float Kp = 20.0f;  //8.5f;      // position gain (stay near center)
-    const float Kv = 20.0f;  //6.2f;      // linear velocity gain (damping)
-    const float Kt = 90.0f; //65.0f;     // angle gain (primary balancing force)
-    const float Ko = 80.0f; //15.5f;     // angVel gain (the 'momentum killer')
+    const float Kp = STABILIZE_LQR_GAIN_POS;            // position gain (stay near center)
+    const float Kv = STABILIZE_LQR_GAIN_VEL_LIN;        // linear velocity gain (damping)
+    const float Kt = STABILIZE_LQR_GAIN_ANGLE;          // angle gain (primary balancing force)
+    const float Ko = STABILIZE_LQR_GAIN_ANG_VEL;        // angVel gain (the 'momentum killer')
 
     // calc target velocity (feedback)
     float targetVelMpS = -(-Kp * posDeltaM + -Kv * linVelMpS + Kt * angleDeltaRad + Ko * angVelRad);
