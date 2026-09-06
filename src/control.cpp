@@ -43,6 +43,7 @@ void Control::gotoState(ControlState state, float curPos)
         _stabilizePID_dstErrorIntegral = 0.0f;
         _stabilizePID_dstErrorDerivative_smoothed = 0.0f;
         _stabilizeLQR_giveUpPerc = 0.0f;
+        _stabilizeLQR_dstErrorIntegral = 0.0f;
         _stepper->setAcceleration(STEPPER_ACCEL_STABILIZING);
         _stepper->setSpeedInHz(STEPPER_SPEED_IN_HZ_STABILIZING);
     }
@@ -133,8 +134,8 @@ float Control::calcCartDeltaMM_swingUp_Setup(float curAngle, float curPos, float
 float Control::calcCartDeltaMM_swingUp(float curAngle, float curPos, float dt) {
     // check to see if we are ready to go into stabilizing
     float energyTotal = getEnergy_total();
-    if ((energyTotal > SWINGUP_MINIMUM_ENERGY) && (abs(curAngle - 180.0f) < 25.0f)) {
-        gotoState(STATE_STABILIZING_SETUP, curPos);
+    if ((energyTotal > SWINGUP_MINIMUM_ENERGY) && (abs(curAngle - 180.0f) < SWINGUP_MINIMUM_ANGLE_ERROR)) {
+        gotoState(STATE_STABILIZING, curPos);
         return 0;
     }
 
@@ -243,7 +244,7 @@ float Control::calcCartDeltaMM_stabilizing_PID(float curAngle, float curPos, flo
     _stabilizePID_dstErrorDerivative_smoothed = (_timeInState == 0) ? derivative_thisFrame :
         (((1.0f - STABILIZE_DERIVATIVE_SMOOTHING) * derivative_thisFrame) + (STABILIZE_DERIVATIVE_SMOOTHING * _stabilizePID_dstErrorDerivative_smoothed));
 
-    // update derivative & integral error trackers
+    // update integral error tracker
     _stabilizePID_dstErrorIntegral += dstError * dt;
     _stabilizePID_dstErrorIntegral = constrain(_stabilizePID_dstErrorIntegral, -2.5f, 2.5f);    // constrain integral to prevent "windup"
     _stabilizePID_dstErrorIntegral *= STABILIZE_INTEGRAL_DECAY;
@@ -284,6 +285,11 @@ float Control::calcCartDeltaMM_stabilizing_LQR(float curAngle, float curPos, flo
     float angleDeltaRad = radians(curAngle - 180.0f); 
     float angVelRad = radians(_angVelSmoothed);
 
+    // update integral error tracker
+    _stabilizeLQR_dstErrorIntegral += angleDeltaRad * dt;
+    _stabilizeLQR_dstErrorIntegral = constrain(_stabilizeLQR_dstErrorIntegral, -1.5f, 1.5f);    // constrain integral to prevent "windup"
+    _stabilizeLQR_dstErrorIntegral *= STABILIZE_INTEGRAL_DECAY;
+
     // if ang vel is too high, progressively give it up
     float giveUpNearEdgeFactor = max(max(((_trackMin + TRACK_GUARDRAIL_DST_MM * TRACK_GUARDRAIL_GIVE_UP_DST_SCALAR) - curPos), 
                                          (curPos - (_trackMax - TRACK_GUARDRAIL_DST_MM * TRACK_GUARDRAIL_GIVE_UP_DST_SCALAR))), 0.0f) * 0.1f;
@@ -296,9 +302,10 @@ float Control::calcCartDeltaMM_stabilizing_LQR(float curAngle, float curPos, flo
     const float Kv = STABILIZE_LQR_GAIN_VEL_LIN;        // linear velocity gain (damping)
     const float Kt = STABILIZE_LQR_GAIN_ANGLE;          // angle gain (primary balancing force)
     const float Ko = STABILIZE_LQR_GAIN_ANG_VEL;        // angVel gain (the 'momentum killer')
+    const float Ki = STABILIZE_LQR_GAIN_INTEGRAL;       // integral gain (for steady-state error)
 
     // calc target velocity (feedback)
-    float targetVelMpS = -(-Kp * posDeltaM + -Kv * linVelMpS + Kt * angleDeltaRad + Ko * angVelRad);
+    float targetVelMpS = -(-Kp * posDeltaM + -Kv * linVelMpS + Kt * angleDeltaRad + Ko * angVelRad + Ki * _stabilizeLQR_dstErrorIntegral);
     float targetVelMMpS = targetVelMpS * 1000.0f * (1.0f - _stabilizeLQR_giveUpPerc);
 
     // constrain
