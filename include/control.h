@@ -42,14 +42,15 @@
 #define STABILIZE_LQR_GAIN_POS                  80.0f                                   // position gain (stay near the center)
 #define STABILIZE_LQR_GAIN_VEL_LIN              12.0f                                   // linear velocity gain (cart speed damping)
 #define STABILIZE_LQR_GAIN_ANGLE               175.0f                                   // angle gain (primary balancing force)
-#define STABILIZE_LQR_GAIN_ANG_VEL              25.0f                                   // angVel gain (the 'momentum killer')
+#define STABILIZE_LQR_GAIN_ANG_VEL              15.0f                                   // angVel gain (the 'momentum killer')
+#define STABILIZE_LQR_GAIN_ANG_VEL_CATCH        (STABILIZE_LQR_GAIN_ANG_VEL * 2.0)      // Used for the first bit into the state
 #define STABILIZE_LQR_GIVE_UP_ANG_VEL           0.075f                                  // angular velocity (rad/s) at which we start giving up
 #define STABILIZE_LQR_GIVE_UP_GAIN              0.5f                                    // scaled by micro-sec deltaTime & signal above max
 #define STABILIZE_LQR_GAIN_INTEGRAL             2.0f                                    // integral gain (for steady-state error)
 
 #define SWINGUP_MINIMUM_ENERGY                  2.05f
 #define SWINGUP_TARGET_ENERGY                   (SWINGUP_MINIMUM_ENERGY + 0.125f)
-#define SWINGUP_MINIMUM_ANGLE_ERROR             25.0f                                   // degrees
+#define SWINGUP_TARGET_MINIMUM_ANGLE_ERROR      25.0f                                   // degrees
 #define SWINGUP_PUMP_KICK_MM                    3.2f
 #define SWINGUP_ENERGY_GAIN                     1.5f                                    // higher is faster swingup
 #define SWINGUP_RAMP_DOWN_GAIN                  1.5f                                    // slows approach to target energy
@@ -83,7 +84,7 @@ public:
 
     bool isControllingVelocityDirectly() const { return _state == STATE_STABILIZING && STABILIZE_USE_LQR == 1; }
 
-    float trackCenter() const { return (_trackMin + _trackMax) * 0.5f; }
+    float trackCenter() const { return (_trackMin + _trackMax) * 0.45f; } // it tends to fail on the far end, so push the mid a bit towards the side with the stepper
     float trackHalfWidth() const { return _trackMax - trackCenter(); }
 
     float getEnergy_total() const { return _energyKinetic + _energyPotential; }

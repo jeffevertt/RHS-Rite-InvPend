@@ -134,7 +134,7 @@ float Control::calcCartDeltaMM_swingUp_Setup(float curAngle, float curPos, float
 float Control::calcCartDeltaMM_swingUp(float curAngle, float curPos, float dt) {
     // check to see if we are ready to go into stabilizing
     float energyTotal = getEnergy_total();
-    if ((energyTotal > SWINGUP_MINIMUM_ENERGY) && (abs(curAngle - 180.0f) < SWINGUP_MINIMUM_ANGLE_ERROR)) {
+    if ((energyTotal > SWINGUP_MINIMUM_ENERGY) && (abs(curAngle - 180.0f) < SWINGUP_TARGET_MINIMUM_ANGLE_ERROR)) {
         gotoState(STATE_STABILIZING, curPos);
         return 0;
     }
@@ -301,7 +301,8 @@ float Control::calcCartDeltaMM_stabilizing_LQR(float curAngle, float curPos, flo
     const float Kp = STABILIZE_LQR_GAIN_POS;            // position gain (stay near center)
     const float Kv = STABILIZE_LQR_GAIN_VEL_LIN;        // linear velocity gain (damping)
     const float Kt = STABILIZE_LQR_GAIN_ANGLE;          // angle gain (primary balancing force)
-    const float Ko = STABILIZE_LQR_GAIN_ANG_VEL;        // angVel gain (the 'momentum killer')
+    const float Ko = STABILIZE_LQR_GAIN_ANG_VEL +       // angVel gain (the 'momentum killer')
+                        + max((STABILIZE_LQR_GAIN_ANG_VEL_CATCH - STABILIZE_LQR_GAIN_ANG_VEL) * (1.0 - _timeInState), 0.0f);
     const float Ki = STABILIZE_LQR_GAIN_INTEGRAL;       // integral gain (for steady-state error)
 
     // calc target velocity (feedback)
